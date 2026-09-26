@@ -6,6 +6,18 @@ The goal is quick capture and low-friction daily use: open a note, type, and let
 
 This is an independent application, not a Google product and not connected to Google Keep. Each installation has one workspace. Sign-in is handled by Cloudflare Access, and anyone its policy allows has full access to that workspace.
 
+![The Notes workspace on desktop: pinned and other notes as colored cards with checklists, due-date badges, and priority meters](docs/screenshots/workspace.png)
+
+<table>
+  <tr>
+    <td width="52%"><img src="docs/screenshots/editor.png" alt="The note editor on desktop, with a checklist, a drag handle, completed items, and a link chip"></td>
+    <td width="24%"><img src="docs/screenshots/mobile.png" alt="The workspace on a phone"></td>
+    <td width="24%"><img src="docs/screenshots/mobile-editor.png" alt="The note editor on a phone"></td>
+  </tr>
+</table>
+
+Screenshots use demo notes; regenerate them with `npm run screenshots`.
+
 ## Contents
 
 - [Using Notes](#using-notes)
@@ -74,33 +86,41 @@ Amber and red header counts flag active checklists with at least one unfinished 
 
 ## Architecture
 
-```text
-Desktop / mobile browser (or home-screen web app)
-  React SPA + CSS + tab-scoped unsaved draft journal (sessionStorage)
-         |
-         | HTTPS, same-origin JSON, CF_Authorization cookie
-         v
-Cloudflare Custom Domain / DNS / managed TLS
-         |
-         v
-Cloudflare Access self-hosted application
-  sign-in, policy, session; adds a signed Cf-Access-Jwt-Assertion header
-         |
-         v
-One Cloudflare Worker (Hono)                                worker/index.ts
-  |-- host/HTTPS check, security headers, body limit, CSRF guard
-  |-- /api/*  : Access JWT verified, then session, notes, settings, export
-  |-- *       : ASSETS binding (built React app, manifest, icons)
-  |
-  |-- DB binding --------------> D1 (SQLite): notes, settings
-  |-- JWT verification --------> <team>.cloudflareaccess.com/cdn-cgi/access/certs
-  `-- Cron 17 5 * * * (daily) -> purge expired trash
-                               -> JSON snapshot to R2 (BACKUPS), 30-day retention
+```mermaid
+flowchart TB
+  subgraph browser["Browser or home-screen app"]
+    ui["React SPA<br/>cards, editor, useNotes save queue"]
+    journal[("sessionStorage<br/>unsaved draft journal")]
+    ui <--> journal
+  end
 
-Public vars: APP_ORIGIN, ENVIRONMENT, ACCESS_TEAM_DOMAIN, ACCESS_AUD
-Bindings:    DB (D1), ASSETS (static assets), BACKUPS (R2, optional)
-Worker secrets: none
+  access["Cloudflare Access<br/>sign-in, allow policy, session"]
+
+  subgraph worker["Cloudflare Worker (Hono)"]
+    guards["Host and HTTPS check<br/>security headers, body limit, CSRF guard"]
+    verify["Access JWT verification"]
+    api["API routes<br/>notes, settings, session, export"]
+    assets["Static assets<br/>React build, manifest, icons"]
+    cron["Daily Cron Trigger<br/>05:17 UTC"]
+    guards --> verify --> api
+    guards --> assets
+  end
+
+  d1[("D1 database (SQLite)<br/>notes, settings")]
+  r2[("R2 bucket BACKUPS<br/>nightly JSON, 30 days")]
+  certs["Access signing keys<br/>team.cloudflareaccess.com/cdn-cgi/access/certs"]
+
+  ui -- "HTTPS, same-origin JSON" --> access
+  access -- "signed JWT header" --> guards
+  verify -. "fetch and cache keys" .-> certs
+  api -- "versioned writes, reads" --> d1
+  cron -- "purge expired trash" --> d1
+  cron -- "snapshot" --> r2
 ```
+
+- **Public vars:** `APP_ORIGIN`, `ENVIRONMENT`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`
+- **Bindings:** `DB` (D1), `ASSETS` (static assets), `BACKUPS` (R2, optional)
+- **Worker secrets:** none
 
 ### Cloudflare pieces
 
@@ -411,6 +431,7 @@ npm run check          # TypeScript only
 npm test              # TypeScript + production build + Vitest
 npm run test:e2e       # Playwright + isolated local Worker/D1
 npm audit             # Dependency advisory check
+npm run screenshots   # Regenerate README screenshots in docs/screenshots
 ```
 
 Vitest covers note rules, sorting, validation, link detection, security boundaries (including Access token verification), and export, nightly backup, and restore in a real local Worker/D1/R2 runtime, plus portable deployment configuration. Playwright covers API behavior, autosave, lost responses, concurrent edits, Access sign-out and session expiry, note lifecycle, undo, filters, colors, desktop/mobile layouts, caret transfer, exact checkbox targeting, one-click priority, drag reordering, card due dates, links, export download, keyboard shortcuts, and the web app manifest.
