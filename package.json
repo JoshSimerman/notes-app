@@ -1,0 +1,46 @@
+{
+  "name": "notes-app",
+  "private": true,
+  "version": "1.0.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "npm run build && vitest run",
+    "test:e2e": "playwright test",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc",
+    "setup:local": "node scripts/setup-local.mjs",
+    "setup:deploy": "node scripts/setup-deploy.mjs",
+    "check:deploy": "node scripts/check-deploy.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "restore": "node scripts/restore-backup.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "hono": "^4.13.9",
+    "lucide-react": "^1.48.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.58.0",
+    "@cloudflare/workers-types": "^5.20260924.1",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsonc-parser": "^3.3.1",
+    "miniflare": "^5.20260921.0-alpha",
+    "prettier": "^3.9.9",
+    "sharp": "^0.35.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1",
+    "wrangler": "^4.137.0"
+  }
+}
