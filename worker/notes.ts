@@ -98,6 +98,21 @@ notes.put("/notes/:id", async (c) => {
   }
   return c.json({ note: saved });
 });
+// Empty trash: permanently deletes the listed notes, but only ones that are
+// still in the trash (another device may have restored one meanwhile).
+notes.delete("/trash", async (c) => {
+  const parsed = z
+    .object({ ids: z.array(z.uuid()).max(10000) })
+    .safeParse(await c.req.json());
+  if (!parsed.success)
+    return c.json({ error: "Choose the notes to delete." }, 400);
+  const result = await c.env.DB.prepare(
+    "DELETE FROM notes WHERE status = 'trashed' AND id IN (SELECT value FROM json_each(?))",
+  )
+    .bind(JSON.stringify(parsed.data.ids))
+    .run();
+  return c.json({ deleted: result.meta.changes });
+});
 notes.put("/settings", async (c) => {
   const parsed = z
     .object({ noteWidth: z.number().int().min(240).max(440) })

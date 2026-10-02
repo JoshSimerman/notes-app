@@ -103,6 +103,13 @@ test("mobile-friendly checklist, autosave, archive, trash, restore, settings and
   await page.route("**/cdn-cgi/access/logout", (route) =>
     route.fulfill({ contentType: "text/html", body: "Signed out of Access" }),
   );
+  // On a phone, settings and sign out live in the header menu.
+  await expect(
+    page.getByRole("button", { name: "Settings", exact: true }),
+  ).toBeHidden();
+  // An active search keeps the top row until it is closed.
+  await page.getByRole("button", { name: "Close search", exact: true }).click();
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByText("Signed out of Access")).toBeVisible();
 });

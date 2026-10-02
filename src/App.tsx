@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Archive,
   AlarmClock,
+  ArrowLeft,
   Bell,
   CloudCheck,
   CloudOff,
   Download,
   LoaderCircle,
   LogOut,
+  Menu,
   NotebookPen,
   Plus,
   Search,
@@ -26,6 +29,7 @@ import {
   type NoteView,
 } from "../shared/notes";
 import { NoteCard } from "./components/NoteCard";
+import { NotesGrid } from "./components/NotesGrid";
 import { Editor } from "./components/Editor";
 import type { EditorFocus } from "./editorFocus";
 import { CloseButton, IconButton, Modal } from "./components/Primitives";
@@ -51,6 +55,39 @@ function Workspace({
   const [now, setNow] = useState(() => new Date());
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  // On phones the search field stays folded behind an icon until it's used.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const outside = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [menuOpen]);
+  // Rendered synchronously so focusing the field opens the phone keyboard.
+  function openSearch() {
+    flushSync(() => setSearchOpen(true));
+    searchRef.current?.focus();
+  }
+  function closeSearch() {
+    setSearch("");
+    setSearchOpen(false);
+  }
+  function openSettings() {
+    setMenuOpen(false);
+    setWidth(store.noteWidth);
+    setSettings(true);
+  }
   const [settings, setSettings] = useState(false);
   const [width, setWidth] = useState(300);
   const [signingOut, setSigningOut] = useState(false);
@@ -79,7 +116,17 @@ function Workspace({
   const pinned = filtered.filter((n) => n.pinned);
   const others = filtered.filter((n) => !n.pinned);
   const current = store.notes.find((n) => n.id === editing?.id);
-  const activeView = view !== "archived" && view !== "trashed";
+  const trash = store.notes.filter((n) => n.status === "trashed");
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const [emptying, setEmptying] = useState(false);
+  async function emptyTrash() {
+    interactionLock.current = true;
+    setEmptying(true);
+    await store.emptyTrash(trash.map((n) => n.id));
+    interactionLock.current = false;
+    setEmptying(false);
+    setConfirmEmpty(false);
+  }
   const dueCounts = { soon: 0, overdue: 0 };
   for (const note of store.notes) {
     const tone = dueAttention(note, now);
@@ -121,7 +168,7 @@ function Workspace({
       if (store.ready) create();
     } else if (e.key === "/") {
       e.preventDefault();
-      searchRef.current?.focus();
+      openSearch();
     } else if (views[e.key]) {
       selectView(views[e.key]);
     }
@@ -133,7 +180,7 @@ function Workspace({
   }, []);
   function selectView(value: NoteView) {
     setView(value);
-    setSearch("");
+    closeSearch();
   }
   const [undo, setUndo] = useState<{
     id: string;
@@ -201,8 +248,7 @@ function Workspace({
             <h2>{label}</h2>
             <span>{notes.length}</span>
           </div>
-          <div
-            className="notes-grid"
+          <NotesGrid
             style={
               { "--note-width": `${store.noteWidth}px` } as React.CSSProperties
             }
@@ -215,7 +261,7 @@ function Workspace({
                 onOpen={(focus) => setEditing({ id: note.id, focus })}
               />
             ))}
-          </div>
+          </NotesGrid>
         </section>
       )
     );
@@ -223,21 +269,37 @@ function Workspace({
   return (
     <div className="app" inert={signingOut}>
       <header className="app-header">
-        <div className="header-main">
+        <div
+          className={`header-main ${searchOpen || search ? "searching" : ""}`}
+        >
           <a
             href="/"
             className="brand"
             onClick={(e) => {
               e.preventDefault();
               setView("active");
-              setSearch("");
+              closeSearch();
             }}
           >
             <img src="/icon.png" alt="" />
             <span>Notes</span>
           </a>
+          <IconButton
+            label="Search"
+            className="icon-button search-toggle"
+            onClick={openSearch}
+          >
+            <Search size={20} />
+          </IconButton>
           <div className="search-field">
-            <Search size={19} />
+            <IconButton
+              label="Close search"
+              className="icon-button search-close"
+              onClick={closeSearch}
+            >
+              <ArrowLeft size={19} />
+            </IconButton>
+            <Search size={19} className="search-icon" />
             <input
               ref={searchRef}
               aria-label="Search notes"
@@ -245,6 +307,9 @@ function Workspace({
               placeholder="Search your notes"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onBlur={() => {
+                if (!search) setSearchOpen(false);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   setSearch("");
@@ -260,6 +325,7 @@ function Workspace({
           </div>
           <button
             className="primary new-note"
+            aria-label="New note"
             aria-keyshortcuts="c n"
             onClick={create}
             disabled={!store.ready || signingOut}
@@ -289,14 +355,13 @@ function Workspace({
             </span>
             <IconButton
               label="Settings"
-              onClick={() => {
-                setWidth(store.noteWidth);
-                setSettings(true);
-              }}
+              className="icon-button wide-only"
+              onClick={openSettings}
             >
               <Settings2 size={20} />
             </IconButton>
             <IconButton
+              className="icon-button wide-only"
               label={session.email ? `Sign out ${session.email}` : "Sign out"}
               disabled={signingOut}
               onClick={() => void logout()}
@@ -307,6 +372,36 @@ function Workspace({
                 <LogOut size={20} />
               )}
             </IconButton>
+            <div className="header-menu" ref={menuRef}>
+              <IconButton
+                label="Menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen(!menuOpen)}
+              >
+                <Menu size={21} />
+              </IconButton>
+              {menuOpen && (
+                <div className="menu-popover">
+                  {session.email && (
+                    <span className="menu-email">{session.email}</span>
+                  )}
+                  <button onClick={openSettings}>
+                    <Settings2 size={18} />
+                    Settings
+                  </button>
+                  <button
+                    disabled={signingOut}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      void logout();
+                    }}
+                  >
+                    <LogOut size={18} />
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="header-secondary">
@@ -388,7 +483,7 @@ function Workspace({
                   title={`${dueCounts[tone]} ${dueCounts[tone] === 1 ? "note" : "notes"} with unfinished work ${tone === "soon" ? "due today or within 3 days" : "past due"}`}
                 >
                   <Icon size={17} />
-                  {label}
+                  <span className="due-label">{label}</span>
                   <span className="due-count">{dueCounts[tone]}</span>
                 </button>
               ))}
@@ -416,7 +511,18 @@ function Workspace({
         {view === "trashed" && (
           <div className="view-intro">
             <h1>Trash</h1>
-            <span>Notes are permanently removed after 90 days.</span>
+            <div className="view-intro-actions">
+              <span>Notes are permanently removed after 90 days.</span>
+              {trash.length > 0 && (
+                <button
+                  className="text-button empty-trash"
+                  onClick={() => setConfirmEmpty(true)}
+                >
+                  <Trash2 size={16} />
+                  Empty trash
+                </button>
+              )}
+            </div>
           </div>
         )}
         {view === "archived" && (
@@ -458,16 +564,13 @@ function Workspace({
           </div>
         ) : filtered.length ? (
           <>
-            {activeView ? (
+            {view === "trashed" ? (
+              section("Deleted notes", filtered)
+            ) : (
               <>
                 {section("Pinned", pinned)}
                 {section("Others", others)}
               </>
-            ) : (
-              section(
-                view === "archived" ? "Archived notes" : "Deleted notes",
-                filtered,
-              )
             )}
           </>
         ) : (
@@ -537,6 +640,40 @@ function Workspace({
           onChange={change}
           onClose={() => setEditing(null)}
         />
+      )}
+      {confirmEmpty && (
+        <Modal
+          title="Empty trash"
+          onClose={() => !emptying && setConfirmEmpty(false)}
+          className="confirm-modal"
+        >
+          <h2>Empty the trash?</h2>
+          <p>
+            {trash.length} {trash.length === 1 ? "note" : "notes"} will be
+            permanently deleted. This can't be undone.
+          </p>
+          <div className="confirm-actions">
+            <button
+              className="text-button"
+              disabled={emptying}
+              onClick={() => setConfirmEmpty(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary danger"
+              disabled={emptying}
+              onClick={() => void emptyTrash()}
+            >
+              {emptying ? (
+                <LoaderCircle size={17} className="spin" />
+              ) : (
+                <Trash2 size={17} />
+              )}
+              Delete forever
+            </button>
+          </div>
+        </Modal>
       )}
       {settings && (
         <Modal

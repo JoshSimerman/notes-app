@@ -190,6 +190,7 @@ p {
 .brand img {
   width: 34px;
   height: 34px;
+  border-radius: 22%;
   object-fit: contain;
 }
 .brand span {
@@ -229,6 +230,50 @@ p {
 }
 .new-note {
   margin-left: auto;
+}
+.search-toggle,
+.search-close,
+.header-menu {
+  display: none;
+}
+.header-menu {
+  position: relative;
+}
+.menu-popover {
+  position: absolute;
+  z-index: 15;
+  top: 42px;
+  right: 0;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  display: flex;
+  flex-direction: column;
+}
+.menu-popover button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+}
+.menu-popover button:hover {
+  background: #ffffff0d;
+}
+.menu-email {
+  padding: 6px 10px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .header-tools {
   display: flex;
@@ -379,11 +424,16 @@ p {
     auto-fill,
     minmax(min(100%, var(--note-width, 300px)), 1fr)
   );
-  gap: 18px;
+  grid-auto-rows: 4px;
+  --grid-gap: 18px;
+  column-gap: var(--grid-gap);
+  /* Each card spans its height plus the gap below it; drop the trailing one. */
+  margin-bottom: calc(-1 * var(--grid-gap));
   align-items: start;
 }
 .note-card {
   min-width: 0;
+  cursor: pointer;
   border: 1px solid #ffffff1f;
   border-radius: 8px;
   overflow: hidden;
@@ -396,6 +446,23 @@ p {
 .note-card:hover {
   border-color: #ffffff40;
   box-shadow: 0 3px 12px #00000026;
+}
+/* Due-date outlines, thickened with a ring so the card doesn't resize. */
+.note-card.due-soon {
+  --due-ring: 0 0 0 1px #f0a830;
+  border-color: #f0a830;
+  box-shadow: var(--due-ring);
+}
+.note-card.due-overdue {
+  --due-ring: 0 0 0 2px #ff3b3b;
+  border-color: #ff3b3b;
+  box-shadow: var(--due-ring);
+}
+.note-card.due-soon:hover,
+.note-card.due-overdue:hover {
+  box-shadow:
+    var(--due-ring),
+    0 3px 12px #00000026;
 }
 .card-heading {
   display: flex;
@@ -498,6 +565,12 @@ p {
   font-size: 12px;
   opacity: 0.7;
   margin-left: 25px;
+}
+.collapse-toggle {
+  gap: 5px;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-left: 4px;
 }
 .note-content {
   display: -webkit-box;
@@ -757,6 +830,24 @@ button.due-badge:hover {
   color: var(--muted);
   font-size: 12px;
 }
+.view-intro-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 18px;
+}
+.empty-trash {
+  color: #ff9fae;
+  font-size: 13px;
+}
+.primary.danger {
+  background: #e5484d;
+  color: #fff;
+}
+.primary.danger:hover {
+  background: #f2555a;
+}
 .view-intro h1 {
   font-size: 20px;
   font-weight: 600;
@@ -929,6 +1020,7 @@ kbd {
   width: 600px;
 }
 .editor-surface {
+  position: relative;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -946,6 +1038,19 @@ kbd {
 .editor-top-actions {
   display: flex;
   gap: 4px;
+}
+.editor-close .close-back {
+  display: none;
+}
+/* Sits just above the toolbar, inside the dialog so it stays clickable. */
+.editor-surface > .undo-toast {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 76px;
+}
+.editor-surface > .undo-toast span {
+  flex: 1;
 }
 .save-indicator {
   font-size: 11px;
@@ -1000,6 +1105,14 @@ kbd {
   gap: 12px;
   margin: 8px 0;
   align-items: flex-start;
+}
+/* Nested items sit one checkbox-width in; the drag preview shifts by the
+   same 28px. */
+.editor-item.nested {
+  margin-left: 28px;
+}
+.card-items .check-row.nested {
+  margin-left: 26px;
 }
 .editor-item input[type="checkbox"] {
   flex-basis: 17px;
@@ -1230,6 +1343,27 @@ kbd {
   background: transparent;
   cursor: pointer;
 }
+.confirm-modal {
+  width: 360px;
+  padding: 22px 24px;
+}
+.confirm-modal h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.confirm-modal p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+  margin-top: 24px;
+}
 .settings-modal {
   width: 400px;
   padding: 22px 24px 28px;
@@ -1331,15 +1465,28 @@ kbd {
     gap: 1px;
   }
   .notes-grid {
-    gap: 14px;
+    --grid-gap: 14px;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
   }
 }
 @media (max-width: 600px) {
   .header-main {
-    padding: 12px 16px 8px;
-    gap: 10px;
-    flex-wrap: wrap;
+    padding: 10px 12px 4px 16px;
+    gap: 6px;
+  }
+  .brand {
+    margin-right: auto;
+  }
+  .search-toggle,
+  .header-menu {
+    display: inline-flex;
+  }
+  .wide-only {
+    display: none;
+  }
+  /* While searching, the field takes over the whole top row. */
+  .header-main.searching > :not(.search-field) {
+    display: none;
   }
   .brand {
     gap: 7px;
@@ -1352,21 +1499,32 @@ kbd {
     font-size: 21px;
   }
   .search-field {
-    order: 4;
-    flex-basis: 100%;
+    display: none;
     max-width: none;
-    margin: 4px 0 0;
+    margin: 0;
     height: 40px;
+    padding: 0 6px 0 2px;
+    gap: 4px;
+  }
+  .header-main.searching .search-field {
+    display: flex;
+  }
+  .search-close {
+    display: inline-flex;
+  }
+  .search-icon {
+    display: none;
   }
   .new-note {
-    min-height: 36px;
-    height: 36px;
-    padding: 7px 10px;
-    font-size: 12px;
-    gap: 5px;
+    min-height: 34px;
+    height: 34px;
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+    margin: 0 4px;
   }
-  .new-note svg {
-    width: 17px;
+  .new-note span {
+    display: none;
   }
   .header-tools .icon-button {
     width: 32px;
@@ -1384,16 +1542,27 @@ kbd {
     width: 100%;
     gap: 14px;
   }
+  /* Priority and due filters share one row; due filters show icon and count. */
   .priority-links,
   .due-links {
+    width: auto;
     border-top: 1px solid #ffffff0a;
+  }
+  .priority-links {
+    flex: 1;
+    gap: 10px;
   }
   .due-links {
     margin-left: 0;
-    gap: 22px;
+    gap: 12px;
   }
-  .priority-links {
-    justify-content: space-between;
+  .due-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
   .sync-status span {
     display: none;
@@ -1401,9 +1570,9 @@ kbd {
   .header-secondary nav button {
     font-size: 12px;
     gap: 6px;
-    min-height: 44px;
-    padding-top: 10px;
-    padding-bottom: 11px;
+    min-height: 40px;
+    padding-top: 8px;
+    padding-bottom: 9px;
   }
   .header-secondary nav button svg {
     width: 15px;
@@ -1418,7 +1587,7 @@ kbd {
   }
   .notes-grid {
     grid-template-columns: 1fr;
-    gap: 14px;
+    --grid-gap: 14px;
   }
   .section-heading {
     margin-bottom: 12px;
@@ -1434,7 +1603,7 @@ kbd {
   }
   .check-row {
     font-size: 14px;
-    margin: 10px 0;
+    margin: 7px 0;
   }
   .card-actions .icon-button {
     height: 34px;
@@ -1477,7 +1646,24 @@ kbd {
     padding-bottom: env(safe-area-inset-bottom);
   }
   .editor-top {
-    padding: 12px 12px 5px 20px;
+    justify-content: flex-start;
+    padding: 12px 12px 5px 10px;
+  }
+  /* A back arrow at the top left, well away from each item's delete button. */
+  .editor-top-actions {
+    display: contents;
+  }
+  .editor-close {
+    order: -1;
+  }
+  .editor-close .close-x {
+    display: none;
+  }
+  .editor-close .close-back {
+    display: block;
+  }
+  .save-indicator {
+    margin-right: auto;
   }
   .editor-body {
     padding: 16px 22px 22px;
@@ -1488,6 +1674,7 @@ kbd {
   }
   .editor-item {
     font-size: 16px;
+    margin: 1px 0;
   }
   .editor-item textarea {
     font-size: 16px;
@@ -1523,8 +1710,19 @@ kbd {
   .header-main {
     gap: 7px;
   }
-  .new-note {
-    padding: 6px 8px;
+  .header-secondary {
+    padding: 0 12px;
+  }
+  .priority-links {
+    gap: 4px;
+  }
+  .due-links {
+    gap: 6px;
+  }
+  .priority-links button,
+  .due-links button {
+    padding-left: 3px;
+    padding-right: 3px;
   }
   .header-tools .icon-button {
     width: 28px;

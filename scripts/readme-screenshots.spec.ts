@@ -1,25 +1,39 @@
 // Regenerates the README screenshots with demo notes: npm run screenshots
 import { test, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
-import { colorPalette, makeNote, type Note } from "../shared/notes";
+import { colorPalette, makeNote, type Item, type Note } from "../shared/notes";
 
 const color = (name: string) =>
   colorPalette.find((c) => c.name === name)!.color;
+// An item starting with ">" nests under the item above it.
 const list = (
   title: string,
   items: string[],
   done: string[],
   patch: Partial<Note> = {},
-): Note => ({
-  ...makeNote(),
-  title,
-  version: 1,
-  items: [
-    ...items.map((text) => ({ id: crypto.randomUUID(), text, done: false })),
-    ...done.map((text) => ({ id: crypto.randomUUID(), text, done: true })),
-  ],
-  ...patch,
-});
+): Note => {
+  let top: string | undefined;
+  const item = (text: string, checked: boolean): Item => {
+    const id = crypto.randomUUID();
+    if (!text.startsWith(">")) top = id;
+    return {
+      id,
+      text: text.replace(/^>/, ""),
+      done: checked,
+      ...(text.startsWith(">") ? { parentId: top } : {}),
+    };
+  };
+  return {
+    ...makeNote(),
+    title,
+    version: 1,
+    items: [
+      ...items.map((text) => item(text, false)),
+      ...done.map((text) => item(text, true)),
+    ],
+    ...patch,
+  };
+};
 const text = (title: string, content: string, patch: Partial<Note> = {}) => ({
   ...makeNote(),
   title,
@@ -50,6 +64,9 @@ const notes: Note[] = [
     "Trip to Kyoto",
     [
       "Book a ryokan near Gion",
+      "Pack",
+      ">Rain jacket",
+      ">Walking shoes",
       "Buy a rail pass",
       "Fall foliage forecast https://www.japan-guide.com/sp/autumn/",
     ],

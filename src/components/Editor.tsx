@@ -1,11 +1,14 @@
 import {
+  useEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   Archive,
   ArchiveRestore,
+  ArrowLeft,
   CalendarDays,
   Check,
   ChevronDown,
@@ -22,13 +25,28 @@ import {
 } from "lucide-react";
 import {
   colorPalette,
-  darkNoteColor,
+  noteColor,
   inkColor,
   convertNote,
+  dragBlock,
+  dropTarget,
+  indentItem,
+  listRows,
+  mergeIntoPrevious,
+  moveItem,
+  normalizeItems,
+  pasteIntoItem,
+  splitItem,
+  textInsertion,
+  toggleItem,
+  trimTrailingEmpty,
+  withParent,
+  type ItemEdit,
+  type ItemRow,
   type Note,
   type Item,
 } from "../../shared/notes";
-import { Modal, IconButton, CloseButton } from "./Primitives";
+import { Modal, IconButton } from "./Primitives";
 import { PriorityPicker } from "./PriorityPicker";
 import { LinkChips } from "./Linkified";
 import type { EditorFocus } from "../editorFocus";
@@ -52,17 +70,48 @@ export function Editor({
   const [conversionMessage, setConversionMessage] = useState("");
   const rows = useRef(new Map<string, HTMLDivElement>());
   const bodyRef = useRef<HTMLDivElement>(null);
+  // A drag picks up a block of rows (an item, or a parent and its children).
+  // `to` and `level` are where it would land, from dropTarget.
   const [drag, setDrag] = useState<{
     id: string;
     from: number;
+    size: number;
     to: number;
+    level: 0 | 1;
     offset: number;
     shift: number;
   } | null>(null);
+  const [removed, setRemoved] = useState<{
+    item: Item;
+    index: number;
+    children: string[];
+  } | null>(null);
+  useEffect(() => {
+    if (!removed) return;
+    const timer = setTimeout(() => setRemoved(null), 10000);
+    return () => clearTimeout(timer);
+  }, [removed]);
+  const colorMenu = useRef<HTMLDetailsElement>(null);
+  const [colorsOpen, setColorsOpen] = useState(false);
+  useEffect(() => {
+    if (!colorsOpen) return;
+    const outside = (e: PointerEvent) => {
+      if (!colorMenu.current?.contains(e.target as Node))
+        colorMenu.current!.open = false;
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [colorsOpen]);
   const trashed = note.status === "trashed";
-  const background = darkNoteColor(note.color);
-  const completed = note.items.filter((i) => i.done);
-  const active = note.items.filter((i) => !i.done);
+  const background = noteColor(note.color);
+  const { active, completed } = listRows(note.items);
+  // Closing drops empty items left at the bottom of the list, in the same
+  // save as any change that closes the note (archive, trash, restore).
+  function close(next: Note = note) {
+    const items = trimTrailingEmpty(next.items);
+    if (next !== note || items !== next.items) onChange({ ...next, items });
+    onClose();
+  }
   function focusOnOpen() {
     const target =
       initialFocus?.field === "item"
@@ -77,33 +126,51 @@ export function Editor({
     input.setSelectionRange(offset, offset);
     input.scrollIntoView({ block: "nearest" });
   }
-  function add(after?: string) {
+  function add() {
     const item: Item = { id: crypto.randomUUID(), text: "", done: false };
-    const items = [...note.items];
-    const index = after
-      ? items.findIndex((i) => i.id === after) + 1
-      : items.length;
-    items.splice(index, 0, item);
-    onChange({ ...note, items });
-    setTimeout(() => refs.current.get(item.id)?.focus(), 0);
+    applyEdit({ items: [...note.items, item], focusId: item.id, offset: 0 });
   }
+  // Render synchronously so fast typing after Enter or paste lands in the
+  // focused item rather than the one it came from.
+  function applyEdit({ items, focusId, offset }: ItemEdit) {
+    flushSync(() => onChange({ ...note, items }));
+    const input = refs.current.get(focusId);
+    input?.focus();
+    input?.setSelectionRange(offset, offset);
+  }
+  // Deleting a parent lifts its children to the top level; Undo nests them
+  // back under it.
   function remove(id: string) {
     const index = note.items.findIndex((i) => i.id === id);
-    const previous = note.items[index - 1];
-    onChange({ ...note, items: note.items.filter((i) => i.id !== id) });
-    if (previous) setTimeout(() => refs.current.get(previous.id)?.focus(), 0);
-  }
-  // Unchecked items reorder among themselves; checked items keep their slots.
-  function moveActive(from: number, to: number) {
-    if (from === to) return;
-    const order = active.map((i) => i.id);
-    order.splice(to, 0, ...order.splice(from, 1));
-    const byId = new Map(note.items.map((i) => [i.id, i]));
-    let next = 0;
+    const previous = active[active.findIndex((r) => r.item.id === id) - 1];
+    const item = note.items[index];
+    const children = note.items
+      .filter((i) => i.parentId === id)
+      .map((i) => i.id);
     onChange({
       ...note,
-      items: note.items.map((i) => (i.done ? i : byId.get(order[next++])!)),
+      items: note.items
+        .filter((i) => i.id !== id)
+        .map((i) => (i.parentId === id ? withParent(i, undefined) : i)),
     });
+    if (item.text.trim() || children.length)
+      setRemoved({ item, index, children });
+    if (previous && !item.done)
+      setTimeout(() => refs.current.get(previous.item.id)?.focus(), 0);
+  }
+  function restore() {
+    if (!removed) return;
+    const children = new Set(removed.children);
+    const items = note.items.map((i) =>
+      children.has(i.id) ? withParent(i, removed.item.id) : i,
+    );
+    items.splice(removed.index, 0, removed.item);
+    setRemoved(null);
+    onChange({ ...note, items: normalizeItems(items) });
+  }
+  function move(id: string, to: number, level: 0 | 1) {
+    const items = moveItem(note.items, id, to, level);
+    if (items) onChange({ ...note, items });
   }
   function startDrag(event: ReactPointerEvent<HTMLButtonElement>, id: string) {
     const body = bodyRef.current;
@@ -111,36 +178,53 @@ export function Editor({
     event.preventDefault();
     const handle = event.currentTarget;
     handle.setPointerCapture(event.pointerId);
-    const from = active.findIndex((i) => i.id === id);
+    const { from, size } = dragBlock(active, id);
+    const startLevel = active[from].level;
     const top = (el: HTMLElement) =>
       el.getBoundingClientRect().top -
       body.getBoundingClientRect().top +
       body.scrollTop;
     // Row positions in scroll-content coordinates, measured once at the start.
-    const slots = active.map((i) => {
-      const el = rows.current.get(i.id)!;
+    const slots = active.map((r) => {
+      const el = rows.current.get(r.item.id)!;
       return { top: top(el), height: el.offsetHeight };
     });
     const gap =
       slots.length > 1 ? slots[1].top - slots[0].top - slots[0].height : 0;
-    const shift = slots[from].height + gap;
+    const last = slots[from + size - 1];
+    const blockHeight = last.top + last.height - slots[from].top;
+    const shift = blockHeight + gap;
+    // Middles of the rows the block can move between.
+    const others = [...slots.slice(0, from), ...slots.slice(from + size)].map(
+      (slot) => slot.top + slot.height / 2,
+    );
     const startY = event.clientY + body.scrollTop;
+    const startX = event.clientX;
     let pointerY = event.clientY;
-    let current = { id, from, to: from, offset: 0, shift };
+    let pointerX = event.clientX;
+    let current = {
+      id,
+      from,
+      size,
+      to: from,
+      level: startLevel,
+      offset: 0,
+      shift,
+    };
     setDrag(current);
     const update = () => {
       const offset = pointerY + body.scrollTop - startY;
-      const center = slots[from].top + slots[from].height / 2 + offset;
-      let to = from;
-      slots.forEach((slot, i) => {
-        const middle = slot.top + slot.height / 2;
-        if (
-          (i > from && center > middle) ||
-          (i < from && center < middle && to === from)
-        )
-          to = i;
-      });
-      current = { ...current, to, offset };
+      const center = slots[from].top + blockHeight / 2 + offset;
+      // Sideways moves nest the item under the one above, or lift it out.
+      const dx = pointerX - startX;
+      const wanted: 0 | 1 = dx > 24 ? 1 : dx < -24 ? 0 : startLevel;
+      const target = dropTarget(
+        note.items,
+        id,
+        others.filter((middle) => middle < center).length,
+        wanted,
+      );
+      current = { ...current, ...target, offset };
       setDrag(current);
     };
     let frame = 0;
@@ -160,31 +244,38 @@ export function Editor({
       frame = requestAnimationFrame(autoscroll);
     };
     frame = requestAnimationFrame(autoscroll);
-    const move = (e: PointerEvent) => {
+    const pointerMove = (e: PointerEvent) => {
       pointerY = e.clientY;
+      pointerX = e.clientX;
       update();
     };
     const end = (e: PointerEvent) => {
       cancelAnimationFrame(frame);
-      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointermove", pointerMove);
       handle.removeEventListener("pointerup", end);
       handle.removeEventListener("pointercancel", end);
       setDrag(null);
-      if (e.type === "pointerup") moveActive(current.from, current.to);
+      if (e.type === "pointerup") move(id, current.to, current.level);
     };
-    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointermove", pointerMove);
     handle.addEventListener("pointerup", end);
     handle.addEventListener("pointercancel", end);
   }
+  // While dragging, the block follows the pointer (shifted sideways when it
+  // will nest or un-nest) and the rows it passes slide to make room.
   function rowStyle(index: number) {
     if (!drag) return undefined;
-    if (index === drag.from)
-      return { transform: `translateY(${drag.offset}px)` };
+    const { from, size, to, offset, shift } = drag;
+    if (index >= from && index < from + size) {
+      const x = index === from ? (drag.level - active[from].level) * 28 : 0;
+      return { transform: `translate(${x}px, ${offset}px)` };
+    }
+    const other = index < from ? index : index - size;
     const y =
-      drag.from < index && index <= drag.to
-        ? -drag.shift
-        : drag.to <= index && index < drag.from
-          ? drag.shift
+      index < from && other >= to
+        ? shift
+        : index >= from + size && other < to
+          ? -shift
           : 0;
     return { transform: `translateY(${y}px)` };
   }
@@ -198,8 +289,9 @@ export function Editor({
         "This note is too long to convert. Its current format has been kept.",
       );
   }
-  function itemRow(item: Item, index: number) {
+  function itemRow({ item, level }: ItemRow, index: number) {
     const draggable = !trashed && !item.done;
+    const dragged = drag && index >= drag.from && index < drag.from + drag.size;
     return (
       <div
         key={item.id}
@@ -208,8 +300,8 @@ export function Editor({
           else rows.current.delete(item.id);
         }}
         className={`editor-item check-row ${item.done ? "checked" : ""} ${
-          drag?.id === item.id ? "dragging" : ""
-        } ${drag ? "reordering" : ""}`}
+          level ? "nested" : ""
+        } ${!item.done && dragged ? "dragging" : ""} ${drag ? "reordering" : ""}`}
         style={item.done ? undefined : rowStyle(index)}
       >
         {draggable ? (
@@ -217,18 +309,24 @@ export function Editor({
             type="button"
             className="drag-handle"
             aria-label={`Reorder ${item.text || "item"}`}
-            title="Drag to reorder (or use arrow keys)"
+            title="Drag to reorder, or sideways to nest (or use arrow keys)"
             onPointerDown={(e) => startDrag(e, item.id)}
             onKeyDown={(e) => {
-              const to =
-                e.key === "ArrowUp"
-                  ? index - 1
-                  : e.key === "ArrowDown"
-                    ? index + 1
-                    : -1;
-              if (to < 0 || to >= active.length) return;
+              let items: Item[] | null = null;
+              if (e.key === "ArrowRight" || e.key === "ArrowLeft")
+                items = indentItem(
+                  note.items,
+                  item.id,
+                  e.key === "ArrowRight" ? 1 : 0,
+                );
+              else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                const { from, size } = dragBlock(active, item.id);
+                const to = e.key === "ArrowUp" ? from - 1 : from + 1;
+                if (to >= 0 && to <= active.length - size)
+                  items = moveItem(note.items, item.id, to, level);
+              } else return;
               e.preventDefault();
-              moveActive(index, to);
+              if (items) onChange({ ...note, items });
               setTimeout(
                 () =>
                   rows.current
@@ -250,12 +348,7 @@ export function Editor({
           checked={item.done}
           disabled={trashed}
           onChange={() =>
-            onChange({
-              ...note,
-              items: note.items.map((i) =>
-                i.id === item.id ? { ...i, done: !i.done } : i,
-              ),
-            })
+            onChange({ ...note, items: toggleItem(note.items, item.id) })
           }
         />
         <textarea
@@ -269,23 +362,87 @@ export function Editor({
           maxLength={5000}
           value={item.text}
           readOnly={trashed}
-          onChange={(e) =>
+          onPaste={(e) => {
+            if (trashed) return;
+            const input = e.currentTarget;
+            const edit = pasteIntoItem(
+              note.items,
+              item.id,
+              input.selectionStart,
+              input.selectionEnd,
+              e.clipboardData.getData("text/plain"),
+            );
+            if (!edit) return;
+            e.preventDefault();
+            applyEdit(edit);
+          }}
+          onChange={(e) => {
+            // Some Android keyboards insert clipboard text without a paste
+            // event; line breaks typed with Shift+Enter stay in the item.
+            const type = (e.nativeEvent as InputEvent).inputType ?? "";
+            if (/^insert(?!LineBreak|Paragraph)/.test(type)) {
+              const { start, end, text } = textInsertion(
+                item.text,
+                e.target.value,
+              );
+              const edit = pasteIntoItem(note.items, item.id, start, end, text);
+              if (edit) return applyEdit(edit);
+            }
             onChange({
               ...note,
               items: note.items.map((i) =>
                 i.id === item.id ? { ...i, text: e.target.value } : i,
               ),
-            })
-          }
+            });
+          }}
           onKeyDown={(e) => {
             if (trashed || e.nativeEvent.isComposing) return;
+            const input = e.currentTarget;
+            const caret = input.selectionStart;
+            // Tab nests the item under the one above; Shift+Tab lifts it out.
+            if (
+              e.key === "Tab" &&
+              !item.done &&
+              !e.altKey &&
+              !e.ctrlKey &&
+              !e.metaKey
+            ) {
+              e.preventDefault();
+              const items = indentItem(note.items, item.id, e.shiftKey ? 0 : 1);
+              if (items) applyEdit({ items, focusId: item.id, offset: caret });
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              add(item.id);
+              applyEdit(
+                splitItem(
+                  note.items,
+                  item.id,
+                  input.selectionStart,
+                  input.selectionEnd,
+                ),
+              );
             }
-            if (e.key === "Backspace" && !item.text) {
-              e.preventDefault();
-              remove(item.id);
+            if (
+              e.key === "Backspace" &&
+              input.selectionStart === 0 &&
+              input.selectionEnd === 0
+            ) {
+              // At the start of a nested item, Backspace first un-nests it.
+              const lifted = level ? indentItem(note.items, item.id, 0) : null;
+              if (lifted) {
+                e.preventDefault();
+                applyEdit({ items: lifted, focusId: item.id, offset: 0 });
+                return;
+              }
+              const edit = mergeIntoPrevious(note.items, item.id);
+              if (edit) {
+                e.preventDefault();
+                applyEdit(edit);
+              } else if (!item.text) {
+                e.preventDefault();
+                remove(item.id);
+              }
             }
           }}
         />
@@ -300,7 +457,7 @@ export function Editor({
   return (
     <Modal
       title="Note editor"
-      onClose={onClose}
+      onClose={() => close()}
       onOpen={focusOnOpen}
       className="editor-modal"
     >
@@ -309,7 +466,6 @@ export function Editor({
         style={
           {
             background,
-            color: inkColor(background),
             "--note-background": background,
           } as React.CSSProperties
         }
@@ -333,7 +489,14 @@ export function Editor({
                 <Pin size={19} fill={note.pinned ? "currentColor" : "none"} />
               </IconButton>
             )}
-            <CloseButton onClick={onClose} />
+            <IconButton
+              label="Close"
+              className="icon-button editor-close"
+              onClick={() => close()}
+            >
+              <X size={20} className="close-x" />
+              <ArrowLeft size={22} className="close-back" />
+            </IconButton>
           </div>
         </div>
         <div className="editor-body" ref={bodyRef}>
@@ -394,6 +557,17 @@ export function Editor({
             texts={[note.title, note.content, ...note.items.map((i) => i.text)]}
           />
         </div>
+        {removed && (
+          <div className="undo-toast" role="status">
+            <span>Item deleted</span>
+            <button className="text-button" onClick={restore}>
+              Undo
+            </button>
+            <IconButton label="Dismiss" onClick={() => setRemoved(null)}>
+              <X size={16} />
+            </IconButton>
+          </div>
+        )}
         {conversionMessage && (
           <p className="conversion-message" role="status">
             {conversionMessage}
@@ -438,10 +612,9 @@ export function Editor({
           {trashed ? (
             <button
               className="text-button"
-              onClick={() => {
-                onChange({ ...note, status: "active", deletedAt: null });
-                onClose();
-              }}
+              onClick={() =>
+                close({ ...note, status: "active", deletedAt: null })
+              }
             >
               <RotateCcw size={18} />
               Restore note
@@ -464,7 +637,18 @@ export function Editor({
                   <Type size={19} />
                 </IconButton>
               </div>
-              <details className="color-menu">
+              <details
+                className="color-menu"
+                ref={colorMenu}
+                onToggle={(e) => setColorsOpen(e.currentTarget.open)}
+                onKeyDown={(e) => {
+                  // Escape closes the palette rather than the whole note.
+                  if (e.key === "Escape" && e.currentTarget.open) {
+                    e.preventDefault();
+                    e.currentTarget.open = false;
+                  }
+                }}
+              >
                 <summary
                   className="icon-button"
                   title="Note color"
@@ -483,7 +667,10 @@ export function Editor({
                         title={name}
                         aria-pressed={background === color}
                         style={{ background: color }}
-                        onClick={() => onChange({ ...note, color })}
+                        onClick={() => {
+                          onChange({ ...note, color });
+                          colorMenu.current!.open = false;
+                        }}
                       >
                         {background === color && (
                           <Check size={16} color={inkColor(color)} />
@@ -498,10 +685,7 @@ export function Editor({
                       aria-label="Custom color"
                       value={background}
                       onChange={(e) =>
-                        onChange({
-                          ...note,
-                          color: darkNoteColor(e.target.value),
-                        })
+                        onChange({ ...note, color: e.target.value })
                       }
                     />
                   </label>
@@ -512,13 +696,12 @@ export function Editor({
                 label={
                   note.status === "archived" ? "Unarchive note" : "Archive note"
                 }
-                onClick={() => {
-                  onChange({
+                onClick={() =>
+                  close({
                     ...note,
                     status: note.status === "archived" ? "active" : "archived",
-                  });
-                  onClose();
-                }}
+                  })
+                }
               >
                 {note.status === "archived" ? (
                   <ArchiveRestore size={19} />
@@ -528,10 +711,7 @@ export function Editor({
               </IconButton>
               <IconButton
                 label="Move to trash"
-                onClick={() => {
-                  onChange({ ...note, status: "trashed" });
-                  onClose();
-                }}
+                onClick={() => close({ ...note, status: "trashed" })}
               >
                 <Trash2 size={19} />
               </IconButton>

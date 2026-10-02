@@ -234,3 +234,36 @@ test("plain text, custom color, and long content fit desktop and mobile", async 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: "test-results/desktop.png", fullPage: true });
 });
+
+test("a custom color shows exactly as picked, live and after reload", async ({
+  page,
+}) => {
+  await login(page);
+  await page
+    .getByRole("button", { name: "New note", exact: true })
+    .first()
+    .click();
+  const editor = page.getByRole("dialog");
+  const title = `Custom color ${Date.now()}`;
+  await editor.getByLabel("Note title").fill(title);
+  await editor.getByLabel("Note color", { exact: true }).click();
+  const picker = editor.getByLabel("Custom color");
+  const surface = editor.locator(".editor-surface");
+  const card = page.locator("article").filter({ hasText: title });
+  // Each step of a drag through the picker previews on the note right away.
+  for (const [pick, rgb] of [
+    ["#e05050", "rgb(224, 80, 80)"],
+    ["#ff9900", "rgb(255, 153, 0)"],
+  ]) {
+    await picker.fill(pick);
+    await expect(picker).toHaveValue(pick);
+    await expect(surface).toHaveCSS("background-color", rgb);
+    await expect(card).toHaveCSS("background-color", rgb);
+  }
+  await expect(surface).toHaveCSS("color", "rgb(231, 233, 236)");
+  await expect(editor.getByRole("status")).toHaveText("All saved");
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+  await page.reload();
+  await expect(card).toHaveCSS("background-color", "rgb(255, 153, 0)");
+  await expect(card).toHaveCSS("color", "rgb(231, 233, 236)");
+});

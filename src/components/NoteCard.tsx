@@ -6,14 +6,18 @@ import {
   CalendarPlus,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Pin,
   RotateCcw,
   Trash2,
 } from "lucide-react";
 import {
+  dueAttention,
   dueStatus,
-  darkNoteColor,
-  inkColor,
+  listRows,
+  noteColor,
+  toggleItem,
+  type ItemRow,
   type Note,
 } from "../../shared/notes";
 import { IconButton } from "./Primitives";
@@ -31,9 +35,12 @@ export function NoteCard({
   onOpen: (focus?: EditorFocus) => void;
 }) {
   const due = dueStatus(note.dueDate);
-  const background = darkNoteColor(note.color);
-  const completed = note.items.filter((i) => i.done);
-  const active = note.items.filter((i) => !i.done);
+  const background = noteColor(note.color);
+  const attention = dueAttention(note);
+  const { active, completed } = listRows(note.items);
+  // Long lists can fold down to their first few unchecked items.
+  const collapsible = active.length > 10;
+  const shown = collapsible && note.collapsed ? active.slice(0, 8) : active;
   const trashed = note.status === "trashed";
   const dateInput = useRef<HTMLInputElement>(null);
   function pickDueDate() {
@@ -45,25 +52,24 @@ export function NoteCard({
       input.focus();
     }
   }
-  function itemRow(item: Note["items"][number]) {
+  function itemRow({ item, level }: ItemRow) {
     return (
-      <div className={`check-row ${item.done ? "checked" : ""}`} key={item.id}>
+      <div
+        className={`check-row ${item.done ? "checked" : ""} ${level ? "nested" : ""}`}
+        key={item.id}
+      >
         <input
           type="checkbox"
           checked={item.done}
           disabled={trashed}
           aria-label={item.text || "Empty item"}
           onChange={() =>
-            onChange({
-              ...note,
-              items: note.items.map((i) =>
-                i.id === item.id ? { ...i, done: !i.done } : i,
-              ),
-            })
+            onChange({ ...note, items: toggleItem(note.items, item.id) })
           }
         />
         <span
           onClick={(e) => {
+            e.stopPropagation();
             onOpen({
               field: "item",
               itemId: item.id,
@@ -82,8 +88,13 @@ export function NoteCard({
   }
   return (
     <article
-      className="note-card"
-      style={{ background, color: inkColor(background) }}
+      className={`note-card ${attention ? `due-${attention}` : ""}`}
+      style={{ background }}
+      // Clicking any part of the card that isn't a control opens the note.
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (!target.closest("button, input, a, label, [role=button]")) onOpen();
+      }}
     >
       <div className="card-heading">
         <button
@@ -108,10 +119,25 @@ export function NoteCard({
       </div>
       {note.kind === "list" ? (
         <div className="card-items">
-          {active.slice(0, 8).map(itemRow)}
-          {active.length > 8 && (
-            <button className="text-button more-items" onClick={() => onOpen()}>
-              +{active.length - 8} more items
+          {shown.map(itemRow)}
+          {collapsible && (
+            <button
+              className="text-button collapse-toggle"
+              onClick={() => onChange({ ...note, collapsed: !note.collapsed })}
+              aria-expanded={!note.collapsed}
+              disabled={trashed}
+            >
+              {note.collapsed ? (
+                <>
+                  <ChevronDown size={14} />
+                  {active.length - shown.length} more items
+                </>
+              ) : (
+                <>
+                  <ChevronUp size={14} />
+                  Show less
+                </>
+              )}
             </button>
           )}
           {!note.items.length && (

@@ -123,3 +123,43 @@ test("desktop and mobile workspace with representative notes", async ({
   await page.getByLabel("Note color", { exact: true }).click();
   await page.screenshot({ path: "test-results/colors-mobile.png" });
 });
+
+test("short notes fill the gap under shorter columns", async ({ page }) => {
+  // Newest first, so createdAt fixes the order: Hardware store comes last.
+  const list = (title: string, count: number, createdAt: number): Note => ({
+    ...makeNote(),
+    title,
+    createdAt,
+    version: 1,
+    items: Array.from({ length: count }, (_, i) => ({
+      id: crypto.randomUUID(),
+      text: `${title} ${i + 1}`,
+      done: false,
+    })),
+  });
+  const notes = [
+    list("Packing", 7, 4),
+    list("Reading", 12, 3),
+    list("Chores", 13, 2),
+    list("Hardware store", 1, 1),
+  ];
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ notes, noteWidth: 300 }),
+    }),
+  );
+  await page.setViewportSize({ width: 1100, height: 1000 });
+  await page.goto("/");
+  const card = (title: string) =>
+    page.locator("article").filter({ hasText: title }).first();
+  await expect(page.locator("article")).toHaveCount(4);
+  const packing = (await card("Packing").boundingBox())!;
+  const reading = (await card("Reading").boundingBox())!;
+  const hardware = (await card("Hardware store").boundingBox())!;
+  expect(hardware.x).toBe(packing.x);
+  expect(hardware.y).toBeLessThan(reading.y + reading.height);
+  expect(hardware.y - (packing.y + packing.height)).toBeGreaterThanOrEqual(18);
+  expect(hardware.y - (packing.y + packing.height)).toBeLessThan(18 + 4);
+  await page.screenshot({ path: "test-results/masonry-desktop.png" });
+});

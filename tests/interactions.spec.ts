@@ -44,11 +44,15 @@ test("only the checkbox toggles a task; autosave and reload preserve note order"
   const checkbox = card.getByRole("checkbox");
   const box = await checkbox.boundingBox();
   expect(box).not.toBeNull();
+  // A near miss beside the checkbox opens the note like the rest of the card,
+  // but never checks the item.
   await page.mouse.click(box!.x + box!.width + 3, box!.y + box!.height / 2);
+  const editor = page.getByRole("dialog", { name: "Note editor" });
+  await expect(editor).toBeVisible();
   await expect(checkbox).not.toBeChecked();
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await card.locator(".check-row > span").click();
-  const editor = page.getByRole("dialog", { name: "Note editor" });
   await expect(editor.getByRole("checkbox")).not.toBeChecked();
   await editor.getByRole("button", { name: "Close", exact: true }).click();
   await checkbox.check();
@@ -103,6 +107,10 @@ test("priority is a persistent one-click choice on cards and in the editor", asy
     picker.getByRole("button", { name: "High priority" }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.setViewportSize({ width: 320, height: 720 });
+  // On a phone, search opens from its icon and takes over the top row.
+  await expect(page.getByLabel("Search notes")).toBeHidden();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByLabel("Search notes")).toBeFocused();
   await page.getByLabel("Search notes").fill(older);
   await page.screenshot({
     path: "test-results/priority-mobile-card.png",

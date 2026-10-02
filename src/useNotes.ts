@@ -235,6 +235,31 @@ export function useNotes(
     }
     return Object.keys(pending.current).length === 0;
   }
+  // Saves pending edits first so a queued save can't bring a deleted note
+  // back as a "recovered" copy.
+  async function emptyTrash(ids: string[]) {
+    if (!(await flush())) {
+      setMessage(
+        "Your latest edits have not synced. Stay connected and try again.",
+      );
+      return false;
+    }
+    try {
+      await api("/trash", "DELETE", { ids });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401)
+        expiry.current(error.message);
+      else setMessage("Could not empty the trash. Please try again.");
+      return false;
+    }
+    // Drop any refresh that started before the delete.
+    editGeneration.current++;
+    const deleted = new Set(ids);
+    setNotes((all) =>
+      all.filter((n) => !deleted.has(n.id) || n.status !== "trashed"),
+    );
+    return true;
+  }
   async function changeWidth(value: number) {
     try {
       await api("/settings", "PUT", { noteWidth: value });
@@ -251,6 +276,7 @@ export function useNotes(
     setMessage,
     noteWidth,
     changeWidth,
+    emptyTrash,
     change,
     create,
     flush,
